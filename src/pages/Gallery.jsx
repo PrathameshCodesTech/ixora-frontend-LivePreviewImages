@@ -104,11 +104,12 @@ const Gallery = () => {
   const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false);
   const [isDeleteContentModalOpen, setIsDeleteContentModalOpen] = useState(false);
   const [selectedDoctorForEdit, setSelectedDoctorForEdit] = useState(null);
+  const [uploadedDoctorImage, setUploadedDoctorImage] = useState(null);
   const [selectedDoctorForDelete, setSelectedDoctorForDelete] = useState(null);
   const [selectedContentForDelete, setSelectedContentForDelete] = useState(null);
   const [regenerateContentType, setRegenerateContentType] = useState('video');
 
-   const debugTokens = () => {
+  const debugTokens = () => {
     console.log("🔍 =====FULL TOKEN DEBUG=====");
     console.log("🔍 localStorage.getItem('Access_Token'):", localStorage.getItem('Access_Token'));
     console.log("🔍 getItemInLocalStorage('Access_Token'):", getItemInLocalStorage('Access_Token'));
@@ -146,24 +147,24 @@ const Gallery = () => {
 
 
       // ADD THIS DEBUG FOR IMAGE REGENERATION:
-    console.log("🔍 =====IMAGE REGENERATION DEBUG=====");
-    response.results.forEach((doctor, index) => {
-      console.log(`🔍 Doctor ${index + 1}: ${doctor.name}`);
-      console.log(`🔍 - Total images: ${doctor.latest_output_image?.length || 0}`);
-      if (doctor.latest_output_image && doctor.latest_output_image.length > 0) {
-        doctor.latest_output_image.forEach((img, imgIndex) => {
-          console.log(`🔍 - Image ${imgIndex + 1}: ${img.output_image_url || img.output_image}`);
-          console.log(`🔍 - Created at: ${img.created_at}`);
-        });
-      }
-      if (doctor.latest_output_video && doctor.latest_output_video.length > 0) {
-  console.log(`🔍 ${doctor.name} - VIDEOS:`, doctor.latest_output_video.length);
-  doctor.latest_output_video.forEach((video, index) => {
-    console.log(`🔍 - Video ${index}: ${video.video_file} (created: ${video.created_at})`);
-  });
-}
-    });
-    console.log("🔍 ===================================");
+      console.log("🔍 =====IMAGE REGENERATION DEBUG=====");
+      response.results.forEach((doctor, index) => {
+        console.log(`🔍 Doctor ${index + 1}: ${doctor.name}`);
+        console.log(`🔍 - Total images: ${doctor.latest_output_image?.length || 0}`);
+        if (doctor.latest_output_image && doctor.latest_output_image.length > 0) {
+          doctor.latest_output_image.forEach((img, imgIndex) => {
+            console.log(`🔍 - Image ${imgIndex + 1}: ${img.output_image_url || img.output_image}`);
+            console.log(`🔍 - Created at: ${img.created_at}`);
+          });
+        }
+        if (doctor.latest_output_video && doctor.latest_output_video.length > 0) {
+          console.log(`🔍 ${doctor.name} - VIDEOS:`, doctor.latest_output_video.length);
+          doctor.latest_output_video.forEach((video, index) => {
+            console.log(`🔍 - Video ${index}: ${video.video_file} (created: ${video.created_at})`);
+          });
+        }
+      });
+      console.log("🔍 ===================================");
       // Debug what we're getting from API
       // Debug what we're getting from API
       console.log("🔍 API Response sample doctor:", response.results[0]);
@@ -344,50 +345,64 @@ const Gallery = () => {
   };
 
 
-  const handleRecreateImage = async () => {
-    if (!selectedTemplate) {
-      return toast.error("Please select image template");
+const handleRecreateImage = async () => {
+  if (!selectedTemplate) {
+    return toast.error("Please select image template");
+  }
+  try {
+    toast.loading("Loading template details...", { id: "template-load" });
+    const templateDetails = await getTemplatesDetailsById(selectedTemplate);
+    toast.dismiss("template-load");
+
+    const currentDoctor = doctorsData.find(doc => doc.id === doctorId);
+
+    // Use FormData for file uploads
+    const formData = new FormData();
+    formData.append('template_id', selectedTemplate);
+    formData.append('doctor_id', doctorId);
+    
+    // Add doctor image if uploaded
+    if (uploadedDoctorImage) {
+      formData.append('doctor_image', uploadedDoctorImage);
+      console.log("🔍 Adding uploaded image to recreation:", uploadedDoctorImage.name);
     }
-    try {
-      // Get template details first to use its custom text
-      toast.loading("Loading template details...", { id: "template-load" });
-      const templateDetails = await getTemplatesDetailsById(selectedTemplate);
-      toast.dismiss("template-load");
+    
+    formData.append('content_data', JSON.stringify({
+      doctor_name: currentDoctor?.name || "",
+      doctor_clinic: currentDoctor?.clinic || "",
+      doctor_city: currentDoctor?.city || "",
+      doctor_specialization: currentDoctor?.specialization || "",
+      doctor_state: currentDoctor?.state || "",
+      imageSettings: templateDetails.text_positions?.imageSettings || {
+        enabled: false,
+        x: 400,
+        y: 50,
+        width: 150,
+        height: 150,
+        fit: 'cover',
+        borderRadius: 50,
+        opacity: 100
+      }
+    }));
 
-      // Get current doctor data for dynamic content
-      const currentDoctor = doctorsData.find(doc => doc.id === doctorId);
+    console.log("🔍 Gallery recreation with FormData and image:", !!uploadedDoctorImage);
 
-      const payload = {
-  template_id: selectedTemplate,
-  doctor_id: doctorId,
-  content_data: {
-    // NO custom_text override - let template handle it
-    // Only send doctor-specific dynamic content
-    doctor_name: currentDoctor?.name || "",
-    doctor_clinic: currentDoctor?.clinic || "",
-    doctor_city: currentDoctor?.city || "",
-    doctor_specialization: currentDoctor?.specialization || "",
-    doctor_state: currentDoctor?.state || ""
+    toast.loading("Creating image...", { id: "recreate-image" });
+    const response = await generateImageContent(formData);
+    setIsRecreateImageModalOpen(false);
+    setUploadedDoctorImage(null); // Reset after use
+    fetchDoctorsData();
+
+    if (response && response.output_image_url) {
+      toast.success("Image created successfully!", { id: "recreate-image" });
+    } else {
+      throw new Error("Failed to create image");
+    }
+  } catch (error) {
+    console.error("Image creation error:", error);
+    toast.error("Failed to create image", { id: "recreate-image" });
   }
 };
-
-      console.log("🔍 Gallery recreation payload:", payload); // DEBUG
-
-      toast.loading("Creating image...", { id: "recreate-image" });
-      const response = await generateImageContent(payload);
-      setIsRecreateImageModalOpen(false);
-      fetchDoctorsData();
-
-      if (response && response.output_image_url) {
-        toast.success("Image created successfully!", { id: "recreate-image" });
-      } else {
-        throw new Error("Failed to create image");
-      }
-    } catch (error) {
-      console.error("Image creation error:", error);
-      toast.error("Failed to create image", { id: "recreate-image" });
-    }
-  };
 
 
   const handleRecreateVideo = async () => {
@@ -629,6 +644,15 @@ const Gallery = () => {
     fetchFilteredTemplatesList(status);
   }, [selectedTemplateType]); // This was missing!
 
+  useEffect(() => {
+  return () => {
+    if (window.livePreviewWindow && !window.livePreviewWindow.closed) {
+      window.livePreviewWindow.close();
+      window.livePreviewWindow = null;
+    }
+  };
+}, []);
+
   const handleTabs = (tab) => {
     setTabs(tab);
     if (tab === "Active") {
@@ -638,71 +662,80 @@ const Gallery = () => {
     }
   };
 
-  const handleAddTemplateSubmit = async () => {
-    try {
-      if (!selectedTemplate) {
-        throw new Error("Please select a template");
+const handleAddTemplateSubmit = async () => {
+  try {
+    if (!selectedTemplate) {
+      throw new Error("Please select a template");
+    }
+    if (!selectedDoctorId) {
+      throw new Error("Doctor ID is missing");
+    }
+
+    if (templateType === "video") {
+      toast.loading("Creating doctor video...", { id: "create-video" });
+
+      const formData = new FormData();
+      formData.append("doctor_id", selectedDoctorId);
+      formData.append("template_id", selectedTemplate);
+
+      const response = await createDoctorVideo(formData);
+
+      if (response && response.id && response.video_file) {
+        toast.success("Video creation initiated successfully!", { id: "create-video" });
+        setIsAddModalOpen(false);
+        setSelectedTemplate("");
+        setSelectedDoctorId(null);
+        getAllDoctors();
+        return;
       }
-      if (!selectedDoctorId) {
-        throw new Error("Doctor ID is missing");
+      throw new Error(response.message || "Failed to create video");
+
+    } else {
+      // IMAGE GENERATION FLOW
+      toast.loading("Creating doctor image...", { id: "create-image" });
+
+      // Use FormData for file uploads
+      const formData = new FormData();
+      formData.append('template_id', selectedTemplate);
+      formData.append('doctor_id', selectedDoctorId);
+      
+      // Add doctor image if uploaded
+      if (uploadedDoctorImage) {
+        formData.append('doctor_image', uploadedDoctorImage);
+        console.log("🔍 Adding uploaded image to creation:", uploadedDoctorImage.name);
       }
+      
+      formData.append('content_data', JSON.stringify({
+        doctor_name: "", // Will be populated from doctor database
+        doctor_clinic: "",
+        doctor_city: "",
+        doctor_specialization: "",
+        doctor_state: ""
+      }));
 
-      if (templateType === "video") {
-        toast.loading("Creating doctor video...", { id: "create-video" });
+      console.log("🔍 Frontend: Submitting FormData with image:", !!uploadedDoctorImage);
 
-        const formData = new FormData();
-        formData.append("doctor_id", selectedDoctorId);
-        formData.append("template_id", selectedTemplate);
+      const response = await generateImageContent(formData);
 
-        const response = await createDoctorVideo(formData);
+      if (response && response.id && response.output_image_url) {
+        toast.success("Image creation successful!", { id: "create-image" });
+        setIsAddModalOpen(false);
+        setSelectedTemplate("");
+        setSelectedDoctorId(null);
+        setUploadedDoctorImage(null); // Reset after successful use
+        getAllDoctors();
+        return;
+      }
+      throw new Error(response.message || "Failed to create image");
+    }
 
-        if (response && response.id && response.video_file) {
-          toast.success("Video creation initiated successfully!", { id: "create-video" });
-          setIsAddModalOpen(false);
-          setSelectedTemplate("");
-          setSelectedDoctorId(null);
-          getAllDoctors();
-          return;
-        }
-        throw new Error(response.message || "Failed to create video");
-
-      } else {
-        // IMAGE GENERATION FLOW
-        toast.loading("Creating doctor image...", { id: "create-image" });
-
-        const payload = {
-  template_id: selectedTemplate,
-  doctor_id: selectedDoctorId,
-  content_data: {
-    // Let template handle custom_text - only send doctor data if available
-    doctor_name: "", // Will be populated from doctor database
-    doctor_clinic: "",
-    doctor_city: "",
-    doctor_specialization: "",
-    doctor_state: ""
+  } catch (error) {
+    console.error("Error creating content:", error);
+    toast.error(error.message || `Failed to create ${templateType}`, {
+      id: templateType === "video" ? "create-video" : "create-image"
+    });
   }
 };
-
-        const response = await generateImageContent(payload);
-
-        if (response && response.id && response.output_image_url) {
-          toast.success("Image creation successful!", { id: "create-image" });
-          setIsAddModalOpen(false);
-          setSelectedTemplate("");
-          setSelectedDoctorId(null);
-          getAllDoctors();
-          return;
-        }
-        throw new Error(response.message || "Failed to create image");
-      }
-
-    } catch (error) {
-      console.error("Error creating content:", error);
-      toast.error(error.message || `Failed to create ${templateType}`, {
-        id: templateType === "video" ? "create-video" : "create-image"
-      });
-    }
-  };
   // specialization
 
   const [expandedRows, setExpandedRows] = useState({});
@@ -812,45 +845,45 @@ const Gallery = () => {
     );
   }
 
- const handleEditModal = async (tempId) => {
-  setT_id(tempId);
-  try {
-    const res = await getTemplatesDetailsById(tempId);
-    setIsEditPage(true);
-    setIsModalOpen(true);
-    
-    // Check if it's an image template
-    if (res.template_type === 'image') {
-      setSelectedTemplateType('image');
-      // Set image template data
-      setImageFormData({
-        templateName: res.name,
-        templateImage: res.template_image,
-        customText: res.custom_text || "Good Morning",
-        textPositions: res.text_positions || {},
-        status: res.status
-      });
-    } else {
-      // Video template (existing logic)
-      setSelectedTemplateType('video');
-      setFormData({
-        ...formData,
-        templateName: res.name,
-        baseXAxis: res.base_x_axis,
-        baseYAxis: res.base_y_axis,
-        timeDuration: res.time_duration,
-        lineSpacing: res.line_spacing,
-        resolution: res.resolution,
-        overlay_x: res.overlay_x,
-        overlay_y: res.overlay_y,
-        templateVideo: res.template_video,
-        status: res.status,
-      });
+  const handleEditModal = async (tempId) => {
+    setT_id(tempId);
+    try {
+      const res = await getTemplatesDetailsById(tempId);
+      setIsEditPage(true);
+      setIsModalOpen(true);
+
+      // Check if it's an image template
+      if (res.template_type === 'image') {
+        setSelectedTemplateType('image');
+        // Set image template data
+        setImageFormData({
+          templateName: res.name,
+          templateImage: res.template_image,
+          customText: res.custom_text || "Good Morning",
+          textPositions: res.text_positions || {},
+          status: res.status
+        });
+      } else {
+        // Video template (existing logic)
+        setSelectedTemplateType('video');
+        setFormData({
+          ...formData,
+          templateName: res.name,
+          baseXAxis: res.base_x_axis,
+          baseYAxis: res.base_y_axis,
+          timeDuration: res.time_duration,
+          lineSpacing: res.line_spacing,
+          resolution: res.resolution,
+          overlay_x: res.overlay_x,
+          overlay_y: res.overlay_y,
+          templateVideo: res.template_video,
+          status: res.status,
+        });
+      }
+    } catch (error) {
+      console.log(error);
     }
-  } catch (error) {
-    console.log(error);
-  }
-};
+  };
   const handleModalClose = () => {
     setIsEditPage(false);
     setIsModalOpen(false);
@@ -899,75 +932,70 @@ const Gallery = () => {
   //   }
   // };
 
-  const handleImageTemplateSubmit = async (imageData) => {
-    try {
-      console.log("Submitting image data:", imageData); // DEBUG
+ const handleImageTemplateSubmit = async (imageData) => {
+  try {
+    console.log("🔍 SUBMITTING IMAGE TEMPLATE with imageData:", imageData); // DEBUG
 
-      const textPositions = {};
+    const textPositions = {};
 
-      // Handle different data structures safely
-      if (imageData.textPositions) {
-        // New structure with textPositions object
-        Object.keys(imageData.textPositions).forEach(key => {
-          textPositions[key] = imageData.textPositions[key];
-        });
-      } else if (imageData.textFields) {
-        // Old structure with textFields array
-        imageData.textFields.forEach(field => {
-          textPositions[field.name] = { x: field.x, y: field.y };
-        });
-      }
+    if (imageData.textPositions) {
+      Object.keys(imageData.textPositions).forEach(key => {
+        textPositions[key] = imageData.textPositions[key];
+      });
+    }
 
-      // Ensure custom text is properly stored
-      if (imageData.customText) {
-        textPositions.customText = {
-          ...textPositions.customText,
-          text: imageData.customText, // Store the actual text content
-          x: textPositions.customText?.x || 200,
-          y: textPositions.customText?.y || 50
-        };
-      }
+    if (imageData.customText) {
+      textPositions.customText = {
+        ...textPositions.customText,
+        text: imageData.customText,
+        x: textPositions.customText?.x || 200,
+        y: textPositions.customText?.y || 50
+      };
+    }
 
-      console.log("Final text positions being saved:", textPositions); // DEBUG
+    // CRITICAL: Add image settings to text_positions
+    if (imageData.imageSettings) {
+      textPositions.imageSettings = imageData.imageSettings;
+      console.log("🔍 INCLUDING imageSettings in text_positions:", imageData.imageSettings); // DEBUG
+    }
 
-      console.log("🔍 ImageData before sending:", imageData); // DEBUG
-      console.log("🔍 Custom text being sent:", imageData.customText); // DEBUG
+    console.log("🔍 Final text_positions being saved:", textPositions); // DEBUG
 
-      const formDataToSend = new FormData();
-      formDataToSend.append("name", imageData.templateName);
-      formDataToSend.append("template_image", imageData.templateImage);
-      formDataToSend.append("text_positions", JSON.stringify(textPositions));
-      formDataToSend.append("custom_text", imageData.customText || ""); // ADD THIS LINE
-      formDataToSend.append("template_type", "image");
-      formDataToSend.append("status", true);
+    const formDataToSend = new FormData();
+    formDataToSend.append("name", imageData.templateName);
+    formDataToSend.append("template_image", imageData.templateImage);
+    formDataToSend.append("text_positions", JSON.stringify(textPositions));
+    formDataToSend.append("custom_text", imageData.customText || "");
+    formDataToSend.append("template_type", "image");
+    formDataToSend.append("status", true);
 
-      // DEBUG: Log all FormData entries
-      for (let [key, value] of formDataToSend.entries()) {
+    // DEBUG: Log all FormData entries
+    for (let [key, value] of formDataToSend.entries()) {
+      if (key === 'text_positions') {
+        console.log(`🔍 FormData ${key}:`, value);
+        console.log(`🔍 Parsed ${key}:`, JSON.parse(value));
+      } else {
         console.log(`🔍 FormData ${key}:`, value);
       }
-      console.log("FormData being sent:", {
-        name: imageData.templateName,
-        text_positions: textPositions,
-        template_type: "image"
-      }); // DEBUG
-
-      toast.loading("Saving image template...", { id: "save-image-template" });
-
-      const response = await AddEmployeeTemplates(formDataToSend, 'image');
-      console.log("Response received:", response); // DEBUG
-
-      if (response && response.id) {
-        toast.success("Image template saved successfully!", { id: "save-image-template" });
-        fetchFilteredTemplatesList(status);
-        handleModalClose();
-      } else {
-        throw new Error("Failed to save image template - no ID returned");
-      }
-    } catch (error) {
-      console.error("Error saving image template:", error);
-      toast.error(`Failed to save: ${error.message}`, { id: "save-image-template" });
     }
-  };
+
+    toast.loading("Saving image template...", { id: "save-image-template" });
+
+    const response = await AddEmployeeTemplates(formDataToSend, 'image');
+    console.log("🔍 Template save response:", response); // DEBUG
+
+    if (response && response.id) {
+      toast.success("Image template saved successfully!", { id: "save-image-template" });
+      fetchFilteredTemplatesList(status);
+      handleModalClose();
+    } else {
+      throw new Error("Failed to save image template - no ID returned");
+    }
+  } catch (error) {
+    console.error("🔍 Error saving image template:", error);
+    toast.error(`Failed to save: ${error.message}`, { id: "save-image-template" });
+  }
+};
 
   return (
     <div className="min-h-screen bg-white px-12 py-11">
@@ -1254,6 +1282,29 @@ const Gallery = () => {
                       </label>
                     </div>
                   </div>
+                  {/* Doctor Image Upload - Only show for image templates */}
+      {templateType === "image" && (
+        <div>
+          <label className="text-sm font-medium mb-1 block">Doctor Photo (Optional)</label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const file = e.target.files[0];
+              if (file) {
+                setUploadedDoctorImage(file);
+                console.log("🔍 Frontend: Doctor image selected:", file.name);
+              }
+            }}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+          />
+          {uploadedDoctorImage && (
+            <div className="mt-2 text-green-600 text-sm">
+              ✅ Image selected: {uploadedDoctorImage.name}
+            </div>
+          )}
+        </div>
+      )}
 
                   {/* Template Selection */}
                   <div>
@@ -1614,9 +1665,9 @@ const Gallery = () => {
                 >
                   Cancel
                 </button>
-                
+
                 <button
-                  
+
                   onClick={async () => {
                     debugTokens();
                     const token = localStorage.getItem('access_token') || localStorage.getItem('access');
@@ -1636,19 +1687,19 @@ const Gallery = () => {
                         content_type: regenerateContentType,
                         employee_id: getItemInLocalStorage("UserId")?.replace(/"/g, ''),
                         content_data: regenerateContentType === "image" ? {
-                        // NO custom_text - template handles this
-                        doctor_name: selectedDoctorForEdit.name,
-                        doctor_clinic: selectedDoctorForEdit.clinic,
-                        doctor_city: selectedDoctorForEdit.city,
-                        doctor_specialization: selectedDoctorForEdit.specialization,
-                        doctor_state: selectedDoctorForEdit.state
-                      } : {}
+                          // NO custom_text - template handles this
+                          doctor_name: selectedDoctorForEdit.name,
+                          doctor_clinic: selectedDoctorForEdit.clinic,
+                          doctor_city: selectedDoctorForEdit.city,
+                          doctor_specialization: selectedDoctorForEdit.specialization,
+                          doctor_state: selectedDoctorForEdit.state
+                        } : {}
                       };
-                      
-console.log("🔍 VIDEO REGENERATION PAYLOAD:", payload);
-console.log("🔍 Content type:", payload.content_type);
-console.log("🔍 Doctor ID:", payload.doctor_id);
-console.log("🔍 Template ID:", payload.template_id);
+
+                      console.log("🔍 VIDEO REGENERATION PAYLOAD:", payload);
+                      console.log("🔍 Content type:", payload.content_type);
+                      console.log("🔍 Doctor ID:", payload.doctor_id);
+                      console.log("🔍 Template ID:", payload.template_id);
                       await regenerateContent(payload);
 
                       toast.success(`${regenerateContentType.charAt(0).toUpperCase() + regenerateContentType.slice(1)} regenerated successfully!`, { id: "regenerate-content" });
@@ -2248,7 +2299,7 @@ console.log("🔍 Template ID:", payload.template_id);
                             <a
                               href={getAbsoluteImageUrl(
                                 doctor.latest_output_image[0]?.output_image_url ||
-doctor.latest_output_image[0]?.output_image
+                                doctor.latest_output_image[0]?.output_image
                               )}
                               target="_blank"
                               rel="noopener noreferrer"
@@ -2686,57 +2737,71 @@ doctor.latest_output_image[0]?.output_image
 };
 
 const ImageTemplateForm = ({ onSubmit, onCancel }) => {
-  const [formData, setFormData] = useState({
-    templateName: "",
-    templateImage: null,
-    customText: "Good Morning", // NEW: Custom text input
-    fieldOrder: ["name", "specialization", "clinic", "city", "state"], // ADD state
-    textPositions: {
-  customText: { x: 200, y: 50, fontSize: 48, color: '#0000ff', fontFamily: 'Arial', fontWeight: 'bold' },
-  name: { x: 100, y: 120, fontSize: 40, color: '#000000', fontFamily: 'Arial', fontWeight: 'bold' },
-  specialization: { x: 100, y: 170, fontSize: 36, color: '#666666', fontFamily: 'Arial', fontWeight: 'normal' },
-  clinic: { x: 100, y: 220, fontSize: 32, color: '#000000', fontFamily: 'Arial', fontWeight: 'normal' },
-  city: { x: 100, y: 270, fontSize: 32, color: '#000000', fontFamily: 'Arial', fontWeight: 'normal' },
-  state: { x: 100, y: 320, fontSize: 32, color: '#000000', fontFamily: 'Arial', fontWeight: 'normal' }
-}
-  });
+ const [formData, setFormData] = useState({
+  templateName: "",
+  templateImage: null,
+  customText: "Good Morning",
+  fieldOrder: ["name", "specialization", "clinic", "city", "state"],
+  textPositions: {
+    customText: { x: 200, y: 50, fontSize: 48, color: '#0000ff', fontFamily: 'Arial', fontWeight: 'bold' },
+    name: { x: 100, y: 120, fontSize: 40, color: '#000000', fontFamily: 'Arial', fontWeight: 'bold' },
+    specialization: { x: 100, y: 170, fontSize: 36, color: '#666666', fontFamily: 'Arial', fontWeight: 'normal' },
+    clinic: { x: 100, y: 220, fontSize: 32, color: '#000000', fontFamily: 'Arial', fontWeight: 'normal' },
+    city: { x: 100, y: 270, fontSize: 32, color: '#000000', fontFamily: 'Arial', fontWeight: 'normal' },
+    state: { x: 100, y: 320, fontSize: 32, color: '#000000', fontFamily: 'Arial', fontWeight: 'normal' }
+  },
+  // ADD THIS NEW SECTION:
+  imageSettings: {
+    enabled: false,        // Whether to show doctor image
+    x: 400,               // X position
+    y: 50,                // Y position  
+    width: 150,           // Image width
+    height: 150,          // Image height
+    fit: 'cover',         // 'cover', 'contain', 'stretch'
+    borderRadius: 50,     // Corner rounding (0-100%)
+    opacity: 100,         // Image transparency (10-100%)
+    border: {
+      enabled: false,
+      width: 2,
+      color: '#000000'
+    }
+  }
+});
 
   const [previewImage, setPreviewImage] = useState(null);
 
   // Handle image upload and create preview
   const handleImageUpload = (e) => {
-  const file = e.target.files[0];
-  if (file) {
-    setFormData({ ...formData, templateImage: file });
+    const file = e.target.files[0];
+    if (file) {
+      setFormData({ ...formData, templateImage: file });
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPreviewImage(reader.result);
-      
-      // Get actual image dimensions
-      const img = new Image();
-      img.onload = () => {
-        console.log(`📐 Image dimensions: ${img.width}x${img.height}`);
-        toast.success(`Image loaded: ${img.width}x${img.height}px`);
-        
-        // Update form state with dimension info
-        setFormData(prev => ({
-          ...prev,
-          imageDimensions: { width: img.width, height: img.height }
-        }));
+      const reader = new FileReader();
+      reader.onload = () => {
+        setPreviewImage(reader.result);
+
+        // Get actual image dimensions
+        const img = new Image();
+        img.onload = () => {
+          console.log(`📐 Image dimensions: ${img.width}x${img.height}`);
+          toast.success(`Image loaded: ${img.width}x${img.height}px`);
+
+          // Update form state with dimension info
+          setFormData(prev => ({
+            ...prev,
+            imageDimensions: { width: img.width, height: img.height }
+          }));
+        };
+        img.src = reader.result;
       };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  }
-};
+      reader.readAsDataURL(file);
+    }
+  };
 
 
   const [previewMode, setPreviewMode] = useState(false);
 
-
-
- const updatePosition = (fieldName, axis, value) => {
+const updatePosition = (fieldName, axis, value) => {
   console.log(`🔧 Updating ${fieldName}.${axis} to:`, value);
   
   let processedValue = value;
@@ -2750,8 +2815,6 @@ const ImageTemplateForm = ({ onSubmit, onCancel }) => {
     if (axis === 'fontSize') {
       processedValue = Math.max(12, Math.min(120, processedValue));
     }
-  } else {
-    processedValue = value;
   }
 
   const newFormData = {
@@ -2768,62 +2831,138 @@ const ImageTemplateForm = ({ onSubmit, onCancel }) => {
   console.log(`✅ New ${fieldName} position:`, newFormData.textPositions[fieldName]);
   setFormData(newFormData);
 
-  // Update live preview window with real-time styling
+  // ENHANCED: Update live preview immediately
   if (window.livePreviewWindow && !window.livePreviewWindow.closed) {
-    window.livePreviewWindow.updatePositions(newFormData.textPositions, newFormData.customText);
+    try {
+      window.livePreviewWindow.updatePositions(newFormData.textPositions, newFormData.customText, newFormData.imageSettings);
+    } catch (error) {
+      console.warn('Failed to update live preview:', error);
+      // Try to recreate connection
+      setTimeout(() => {
+        try {
+          window.livePreviewWindow.updatePositions(newFormData.textPositions, newFormData.customText, newFormData.imageSettings);
+        } catch (e) {
+          console.warn('Live preview connection lost');
+        }
+      }, 100);
+    }
   }
 };
-// Add this function to receive updates from the live preview window
-window.updatePositionFromPreview = (fieldName, x, y) => {
-  setFormData(prev => ({
-    ...prev,
-    textPositions: {
-      ...prev.textPositions,
-      [fieldName]: {
-        ...prev.textPositions[fieldName],
+
+
+// Add this function after updatePosition
+const updateImageSetting = (setting, value) => {
+  console.log(`🔧 Updating image ${setting} to:`, value);
+  
+  let processedValue = value;
+  
+  // Handle different value types
+  if (setting === 'x' || setting === 'y' || setting === 'width' || setting === 'height') {
+    processedValue = parseInt(value) || 0;
+    
+    // Boundary checking
+    const canvasWidth = formData.imageDimensions?.width || 800;
+    const canvasHeight = formData.imageDimensions?.height || 600;
+    
+    if (setting === 'x') {
+      processedValue = Math.max(0, Math.min(canvasWidth - formData.imageSettings.width, processedValue));
+    }
+    if (setting === 'y') {
+      processedValue = Math.max(0, Math.min(canvasHeight - formData.imageSettings.height, processedValue));
+    }
+    if (setting === 'width' || setting === 'height') {
+      processedValue = Math.max(50, Math.min(400, processedValue));
+    }
+  }
+  
+  if (setting === 'borderRadius' || setting === 'opacity') {
+    processedValue = parseInt(value) || 0;
+  }
+
+  const newFormData = {
+    ...formData,
+    imageSettings: {
+      ...formData.imageSettings,
+      [setting]: processedValue
+    }
+  };
+  
+  setFormData(newFormData);
+
+  // Update live preview immediately
+  if (window.livePreviewWindow && !window.livePreviewWindow.closed) {
+    try {
+      window.livePreviewWindow.updatePositions(newFormData.textPositions, newFormData.customText, newFormData.imageSettings);
+    } catch (error) {
+      console.warn('Failed to update live preview:', error);
+    }
+  }
+};
+
+
+//Add this function to receive updates from the live preview window
+//Add this function to receive updates from the live preview window
+  window.updatePositionFromPreview = (fieldName, x, y) => {
+    setFormData(prev => ({
+      ...prev,
+      textPositions: {
+        ...prev.textPositions,
+        [fieldName]: {
+          ...prev.textPositions[fieldName],
+          x: x,
+          y: y
+        }
+      }
+    }));
+  };
+
+  window.updateImagePositionFromPreview = (x, y) => {
+    setFormData(prev => ({
+      ...prev,
+      imageSettings: {
+        ...prev.imageSettings,
         x: x,
         y: y
       }
-    }
-  }));
-};
-  const handleSubmit = (e) => {
-  e.preventDefault();
-  if (!formData.templateName.trim()) {
-    toast.error("Template name is required");
-    return;
-  }
-  if (!formData.templateImage) {
-    toast.error("Template image is required");
-    return;
-  }
-  if (!formData.customText.trim()) {
-    toast.error("Custom text is required");
-    return;
-  }
-
-  // Validate text positions are within reasonable bounds
-  const validatePosition = (field, position) => {
-    if (position.x < 0 || position.y < 0) {
-      toast.error(`${field} position cannot be negative`);
-      return false;
-    }
-    if (position.x > 2000 || position.y > 2000) {
-      toast.error(`${field} position is too large (max 2000px)`);
-      return false;
-    }
-    return true;
+    }));
   };
-
-  // Check all positions
-  for (const [fieldName, position] of Object.entries(formData.textPositions)) {
-    if (!validatePosition(fieldName, position)) {
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.templateName.trim()) {
+      toast.error("Template name is required");
       return;
     }
-  }
+    if (!formData.templateImage) {
+      toast.error("Template image is required");
+      return;
+    }
+    if (!formData.customText.trim()) {
+      toast.error("Custom text is required");
+      return;
+    }
+
+    // Validate text positions are within reasonable bounds
+    const validatePosition = (field, position) => {
+      if (position.x < 0 || position.y < 0) {
+        toast.error(`${field} position cannot be negative`);
+        return false;
+      }
+      if (position.x > 2000 || position.y > 2000) {
+        toast.error(`${field} position is too large (max 2000px)`);
+        return false;
+      }
+      return true;
+    };
+
+    // Check all positions
+    for (const [fieldName, position] of Object.entries(formData.textPositions)) {
+      if (!validatePosition(fieldName, position)) {
+        return;
+      }
+    }
 
     // Add custom text to text positions before submitting
-    const finalFormData = {
+const finalFormData = {
       ...formData,
       textPositions: {
         ...formData.textPositions,
@@ -2831,7 +2970,8 @@ window.updatePositionFromPreview = (fieldName, x, y) => {
           ...formData.textPositions.customText,
           text: formData.customText // Store the actual text content
         }
-      }
+      },
+      imageSettings: formData.imageSettings
     };
 
     console.log("Submitting template with custom text:", finalFormData); // DEBUG
@@ -2865,19 +3005,26 @@ window.updatePositionFromPreview = (fieldName, x, y) => {
         {/* Custom Text Input */}
         <div>
           <textarea
-  value={formData.customText}
-  onChange={(e) => {
-  setFormData({ ...formData, customText: e.target.value });
-  // Update live preview with new text content
+            value={formData.customText}
+           onChange={(e) => {
+  const newText = e.target.value;
+  setFormData({ ...formData, customText: newText });
+  // Update live preview with new text content - ENHANCED
   if (window.livePreviewWindow && !window.livePreviewWindow.closed) {
-    window.livePreviewWindow.updatePositions(formData.textPositions, e.target.value);
+    try {
+      setTimeout(() => {
+        window.livePreviewWindow.updatePositions(formData.textPositions, newText);
+      }, 10);
+    } catch (error) {
+      console.warn('Failed to update live preview text:', error);
+    }
   }
 }}
-  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-  placeholder="Enter custom text like 'Good Morning&#10;New line supported'"
-  rows={3}
-/>
-<p className="text-xs text-gray-500 mt-1">💡 Press Enter for new lines</p>
+            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+            placeholder="Enter custom text like 'Good Morning&#10;New line supported'"
+            rows={3}
+          />
+          <p className="text-xs text-gray-500 mt-1">💡 Press Enter for new lines</p>
         </div>
 
         {/* Font & Color Controls */}
@@ -2900,15 +3047,15 @@ window.updatePositionFromPreview = (fieldName, x, y) => {
           <div>
             <label className="text-xs text-gray-600 mb-1 block">Text Color</label>
             <div className="flex items-center space-x-2">
-             <input
-  type="color"
-  value={formData.textPositions.customText?.color || '#0000ff'}
-  onChange={(e) => {
-  console.log("🎨 Color changed to:", e.target.value); // DEBUG
-  updatePosition('customText', 'color', e.target.value);
-}}
-  className="w-8 h-8 rounded border border-gray-300"
-/>
+              <input
+                type="color"
+                value={formData.textPositions.customText?.color || '#0000ff'}
+                onChange={(e) => {
+                  console.log("🎨 Color changed to:", e.target.value); // DEBUG
+                  updatePosition('customText', 'color', e.target.value);
+                }}
+                className="w-8 h-8 rounded border border-gray-300"
+              />
               <input
                 type="text"
                 value={formData.textPositions.customText?.color || '#0000ff'}
@@ -2920,40 +3067,40 @@ window.updatePositionFromPreview = (fieldName, x, y) => {
           </div>
 
           {/* Font Family */}
-<div>
-  <label className="text-xs text-gray-600 mb-1 block">Font Family</label>
-<select
-  value={formData.textPositions.customText?.fontFamily || 'Arial'}
-  onChange={(e) => {
-    console.log("📝 Font changed to:", e.target.value); // DEBUG
-    updatePosition('customText', 'fontFamily', e.target.value);
-  }}
-  className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
->
-    <option value="Arial">Arial</option>
-    <option value="Times New Roman">Times New Roman</option>
-    <option value="Helvetica">Helvetica</option>
-    <option value="Georgia">Georgia</option>
-    <option value="Verdana">Verdana</option>
-    <option value="Impact">Impact</option>
-    <option value="Comic Sans MS">Comic Sans MS</option>
-  </select>
-</div>
+          <div>
+            <label className="text-xs text-gray-600 mb-1 block">Font Family</label>
+            <select
+              value={formData.textPositions.customText?.fontFamily || 'Arial'}
+              onChange={(e) => {
+                console.log("📝 Font changed to:", e.target.value); // DEBUG
+                updatePosition('customText', 'fontFamily', e.target.value);
+              }}
+              className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
+            >
+              <option value="Arial">Arial</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Helvetica">Helvetica</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Verdana">Verdana</option>
+              <option value="Impact">Impact</option>
+              <option value="Comic Sans MS">Comic Sans MS</option>
+            </select>
+          </div>
 
-{/* Font Weight */}
-<div>
-  <label className="text-xs text-gray-600 mb-1 block">Font Weight</label>
-  <select
-    value={formData.textPositions.customText?.fontWeight || 'bold'}
-    onChange={(e) => updatePosition('customText', 'fontWeight', e.target.value)}
-    className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
-  >
-    <option value="normal">Normal</option>
-    <option value="bold">Bold</option>
-    <option value="600">Semi Bold</option>
-    <option value="800">Extra Bold</option>
-  </select>
-</div>
+          {/* Font Weight */}
+          <div>
+            <label className="text-xs text-gray-600 mb-1 block">Font Weight</label>
+            <select
+              value={formData.textPositions.customText?.fontWeight || 'bold'}
+              onChange={(e) => updatePosition('customText', 'fontWeight', e.target.value)}
+              className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
+            >
+              <option value="normal">Normal</option>
+              <option value="bold">Bold</option>
+              <option value="600">Semi Bold</option>
+              <option value="800">Extra Bold</option>
+            </select>
+          </div>
 
           {/* Text Shadow */}
           <div>
@@ -2970,6 +3117,131 @@ window.updatePositionFromPreview = (fieldName, x, y) => {
             </select>
           </div>
         </div>
+      </div>
+
+      {/* Doctor Image Settings */}
+      <div className="space-y-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+        <div className="flex items-center justify-between">
+          <label className="block text-sm font-medium text-green-700 mb-2">
+            Doctor Image Settings (Optional)
+          </label>
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              checked={formData.imageSettings.enabled}
+              onChange={(e) => {
+                const newFormData = {
+                  ...formData,
+                  imageSettings: { ...formData.imageSettings, enabled: e.target.checked }
+                };
+                setFormData(newFormData);
+                
+                if (window.livePreviewWindow && !window.livePreviewWindow.closed) {
+                  try {
+                    window.livePreviewWindow.updatePositions(newFormData.textPositions, newFormData.customText, newFormData.imageSettings);
+                  } catch (error) {
+                    console.warn('Failed to update live preview:', error);
+                  }
+                }
+              }}
+              className="mr-2"
+            />
+            <span className="text-sm text-green-700 font-medium">Show Doctor Photo</span>
+          </label>
+        </div>
+
+        {formData.imageSettings.enabled && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Left Position</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="800"
+                  value={formData.imageSettings.x}
+                  onChange={(e) => updateImageSetting('x', e.target.value)}
+                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Top Position</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="600"
+                  value={formData.imageSettings.y}
+                  onChange={(e) => updateImageSetting('y', e.target.value)}
+                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Width</label>
+                <input
+                  type="number"
+                  min="50"
+                  max="400"
+                  value={formData.imageSettings.width}
+                  onChange={(e) => updateImageSetting('width', e.target.value)}
+                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Height</label>
+                <input
+                  type="number"
+                  min="50"
+                  max="400"
+                  value={formData.imageSettings.height}
+                  onChange={(e) => updateImageSetting('height', e.target.value)}
+                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Image Fit</label>
+                <select
+                  value={formData.imageSettings.fit}
+                  onChange={(e) => updateImageSetting('fit', e.target.value)}
+                  className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
+                >
+                  <option value="cover">Cover (Crop to fit)</option>
+                  <option value="contain">Contain (Show full)</option>
+                  <option value="stretch">Stretch (Distort)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Border Radius</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={formData.imageSettings.borderRadius}
+                  onChange={(e) => updateImageSetting('borderRadius', e.target.value)}
+                  className="w-full"
+                />
+                <span className="text-xs text-gray-500">{formData.imageSettings.borderRadius}%</span>
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 mb-1 block">Opacity</label>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  value={formData.imageSettings.opacity}
+                  onChange={(e) => updateImageSetting('opacity', e.target.value)}
+                  className="w-full"
+                />
+                <span className="text-xs text-gray-500">{formData.imageSettings.opacity}%</span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Template Image Upload */}
@@ -3013,102 +3285,102 @@ window.updatePositionFromPreview = (fieldName, x, y) => {
               </div>
 
               {/* Position Controls */}
-             {/* Position Controls */}
-<div className="grid grid-cols-2 gap-2 mb-2">
-  <div>
-    <label className="text-xs text-gray-600">Left</label>
-    <input
-      type="number"
-      value={formData.textPositions[fieldName]?.x || 0}
-      onChange={(e) => updatePosition(fieldName, 'x', e.target.value)}
-      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-    />
-  </div>
-  <div>
-    <label className="text-xs text-gray-600">Top</label>
-    <input
-      type="number"
-      value={formData.textPositions[fieldName]?.y || 0}
-      onChange={(e) => updatePosition(fieldName, 'y', e.target.value)}
-      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-    />
-  </div>
-  <div>
-    <label className="text-xs text-gray-600">Size</label>
-    <input
-      type="number"
-      min="16"
-      max="60"
-      value={formData.textPositions[fieldName]?.fontSize || 32}
-      onChange={(e) => updatePosition(fieldName, 'fontSize', e.target.value)}
-      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-    />
-  </div>
-  <div>
-    <label className="text-xs text-gray-600">Color</label>
-    <div className="flex items-center space-x-2">
-      <input
-        type="color"
-        value={formData.textPositions[fieldName]?.color || '#000000'}
-        onChange={(e) => {
-          console.log(`🎨 ${fieldName} color changed to:`, e.target.value);
-          updatePosition(fieldName, 'color', e.target.value);
-        }}
-        className="w-10 h-8 rounded border border-gray-300 cursor-pointer"
-      />
-      <input
-        type="text"
-        value={formData.textPositions[fieldName]?.color || '#000000'}
-        onChange={(e) => updatePosition(fieldName, 'color', e.target.value)}
-        className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded"
-        placeholder="#000000"
-      />
-    </div>
-  </div>
-</div>
+              {/* Position Controls */}
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div>
+                  <label className="text-xs text-gray-600">Left</label>
+                  <input
+                    type="number"
+                    value={formData.textPositions[fieldName]?.x || 0}
+                    onChange={(e) => updatePosition(fieldName, 'x', e.target.value)}
+                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Top</label>
+                  <input
+                    type="number"
+                    value={formData.textPositions[fieldName]?.y || 0}
+                    onChange={(e) => updatePosition(fieldName, 'y', e.target.value)}
+                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Size</label>
+                  <input
+                    type="number"
+                    min="16"
+                    max="60"
+                    value={formData.textPositions[fieldName]?.fontSize || 32}
+                    onChange={(e) => updatePosition(fieldName, 'fontSize', e.target.value)}
+                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Color</label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="color"
+                      value={formData.textPositions[fieldName]?.color || '#000000'}
+                      onChange={(e) => {
+                        console.log(`🎨 ${fieldName} color changed to:`, e.target.value);
+                        updatePosition(fieldName, 'color', e.target.value);
+                      }}
+                      className="w-10 h-8 rounded border border-gray-300 cursor-pointer"
+                    />
+                    <input
+                      type="text"
+                      value={formData.textPositions[fieldName]?.color || '#000000'}
+                      onChange={(e) => updatePosition(fieldName, 'color', e.target.value)}
+                      className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded"
+                      placeholder="#000000"
+                    />
+                  </div>
+                </div>
+              </div>
 
               {/* Advanced Controls */}
               {/* Advanced Controls */}
-<div className="grid grid-cols-3 gap-2">
-  <div>
-    <label className="text-xs text-gray-600">Font</label>
-    <select
-      value={formData.textPositions[fieldName]?.fontFamily || 'Arial'}
-      onChange={(e) => updatePosition(fieldName, 'fontFamily', e.target.value)}
-      className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
-    >
-      <option value="Arial">Arial</option>
-      <option value="Times New Roman">Times</option>
-      <option value="Helvetica">Helvetica</option>
-      <option value="Georgia">Georgia</option>
-      <option value="Verdana">Verdana</option>
-    </select>
-  </div>
-  <div>
-    <label className="text-xs text-gray-600">Weight</label>
-    <select
-      value={formData.textPositions[fieldName]?.fontWeight || 'normal'}
-      onChange={(e) => updatePosition(fieldName, 'fontWeight', e.target.value)}
-      className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
-    >
-      <option value="normal">Normal</option>
-      <option value="bold">Bold</option>
-      <option value="600">Semi Bold</option>
-    </select>
-  </div>
-  <div>
-    <label className="text-xs text-gray-600">Shadow</label>
-    <select
-      value={formData.textPositions[fieldName]?.textShadow || 'none'}
-      onChange={(e) => updatePosition(fieldName, 'textShadow', e.target.value)}
-      className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
-    >
-      <option value="none">None</option>
-      <option value="1px 1px 2px rgba(0,0,0,0.5)">Light</option>
-      <option value="2px 2px 4px rgba(0,0,0,0.7)">Medium</option>
-    </select>
-  </div>
-</div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-xs text-gray-600">Font</label>
+                  <select
+                    value={formData.textPositions[fieldName]?.fontFamily || 'Arial'}
+                    onChange={(e) => updatePosition(fieldName, 'fontFamily', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
+                  >
+                    <option value="Arial">Arial</option>
+                    <option value="Times New Roman">Times</option>
+                    <option value="Helvetica">Helvetica</option>
+                    <option value="Georgia">Georgia</option>
+                    <option value="Verdana">Verdana</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Weight</label>
+                  <select
+                    value={formData.textPositions[fieldName]?.fontWeight || 'normal'}
+                    onChange={(e) => updatePosition(fieldName, 'fontWeight', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="bold">Bold</option>
+                    <option value="600">Semi Bold</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600">Shadow</label>
+                  <select
+                    value={formData.textPositions[fieldName]?.textShadow || 'none'}
+                    onChange={(e) => updatePosition(fieldName, 'textShadow', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
+                  >
+                    <option value="none">None</option>
+                    <option value="1px 1px 2px rgba(0,0,0,0.5)">Light</option>
+                    <option value="2px 2px 4px rgba(0,0,0,0.7)">Medium</option>
+                  </select>
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -3147,241 +3419,840 @@ window.updatePositionFromPreview = (fieldName, x, y) => {
       </div>
 
       {/* Preview Mode Toggle */}
-        <div className="flex justify-center gap-3">
-  {previewImage && (
-    <button
-      type="button"
-      onClick={() => {
-        const livePreviewWindow = window.open('', 'live-preview', 'width=1200,height=800');
+      <div className="flex justify-center gap-3">
+        {previewImage && (
+          <button
+            type="button"
+//           onClick={() => {
+//   // Close existing preview window if open
+//   if (window.livePreviewWindow && !window.livePreviewWindow.closed) {
+//     window.livePreviewWindow.close();
+//   }
+  
+//   const livePreviewWindow = window.open('', 'live-preview', 'width=1200,height=800,scrollbars=yes,resizable=yes');
+  
+//   // Prepare the data
+//   const positionsData = JSON.stringify(formData.textPositions);
+//   const customTextData = JSON.stringify(formData.customText);
+// const canvasWidth = formData.imageDimensions?.width || 1080;
+// const canvasHeight = formData.imageDimensions?.height || 1080;
+  
+//   livePreviewWindow.document.write(`
+//     <!DOCTYPE html>
+//     <html>
+//       <head>
+//         <title>Live Template Preview</title>
+//         <style>
+//           body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
+//           .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+//           .canvas { position: relative; border: 2px solid #333; margin: 20px auto; background-size: cover; background-repeat: no-repeat; background-position: center; overflow: hidden; }
+//           .text-element { position: absolute; border: 2px dashed #3b82f6; background: rgba(255,255,255,0.8); padding: 4px 8px; border-radius: 4px; cursor: move; user-select: none; white-space: pre-line; transition: all 0.2s ease; min-width: 20px; min-height: 20px; }
+//           .text-element:hover { background: rgba(59,130,246,0.1); transform: scale(1.02); }
+//           .text-element.boundary-warning { border-color: #ef4444 !important; background: rgba(239,68,68,0.1) !important; }
+//           .header { text-align: center; margin-bottom: 20px; }
+//           .coords { position: absolute; top: -25px; left: 0; background: #333; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; pointer-events: none; z-index: 1000; }
+//           .field-label { position: absolute; top: -50px; right: 0; background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; pointer-events: none; z-index: 1000; }
+//           .controls { margin-bottom: 20px; text-align: center; }
+//           .sync-indicator { display: inline-block; padding: 4px 8px; background: #10b981; color: white; border-radius: 4px; font-size: 12px; margin-left: 10px; }
+//         </style>
+//       </head>
+//       <body>
+//         <div class="container">
+//           <div class="header">
+//             <h2>🎨 Live Template Preview</h2>
+//             <p>✨ Real-time updates: Colors, fonts, and positions sync instantly! Drag elements to reposition.</p>
+//             <div class="controls">
+//               <span>Canvas: ${canvasWidth}×${canvasHeight}px</span>
+//               <span class="sync-indicator" id="syncStatus">🔄 Synced</span>
+//             </div>
+//           </div>
+//           <div id="canvas" class="canvas" style="width: ${canvasWidth}px; height: ${canvasHeight}px; background-image: url('${previewImage}');">
+//           </div>
+//         </div>
         
-        livePreviewWindow.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Live Template Preview</title>
-              <style>
-                body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
-                .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-                .canvas { position: relative; border: 2px solid #333; margin: 20px auto; background-size: cover; background-repeat: no-repeat; background-position: center; }
-                .text-element { position: absolute; border: 2px dashed #3b82f6; background: rgba(255,255,255,0.8); padding: 4px 8px; border-radius: 4px; cursor: move; user-select: none; white-space: pre-line; transition: all 0.2s ease; }
-                .text-element:hover { background: rgba(59,130,246,0.1); transform: scale(1.02); }
-                .header { text-align: center; margin-bottom: 20px; }
-                .coords { position: absolute; top: -25px; left: 0; background: #333; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; pointer-events: none; }
-                .field-label { position: absolute; top: -50px; right: 0; background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; pointer-events: none; }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <div class="header">
-                  <h2>🎨 Live Template Preview</h2>
-                  <p>✨ Real-time updates: Colors, fonts, and positions sync instantly! Drag elements to reposition.</p>
-                </div>
-                <div id="canvas" class="canvas" style="width: ${formData.imageDimensions?.width || 800}px; height: ${formData.imageDimensions?.height || 600}px; background-image: url('${previewImage}');">
-                </div>
-              </div>
+//         <script>
+//           let isDragging = false;
+//           let currentElement = null;
+//           let dragOffset = { x: 0, y: 0 };
+//           let isUpdating = false;
+          
+//           const CANVAS_WIDTH = ${canvasWidth};
+//           const CANVAS_HEIGHT = ${canvasHeight};
+//           const PADDING = 10;
+          
+//           function setSyncStatus(status, color = '#10b981') {
+//             const indicator = document.getElementById('syncStatus');
+//             if (indicator) {
+//               indicator.textContent = status;
+//               indicator.style.background = color;
+//             }
+//           }
+          
+//           function createTextElements() {
+//             const canvas = document.getElementById('canvas');
+//             canvas.innerHTML = '';
+            
+//             const positions = ${positionsData};
+//             const customText = ${customTextData};
+            
+//             console.log('Creating elements with positions:', positions);
+//             console.log('Custom text:', customText);
+            
+//             // Create custom text element
+//             if (positions.customText) {
+//               createTextElement('customText', customText, positions.customText, 'Custom Text');
+//             }
+            
+//             // Create doctor field elements
+//             const sampleData = {
+//               name: 'Dr. John Smith',
+//               specialization: 'Cardiologist', 
+//               clinic: 'City Hospital',
+//               city: 'Mumbai',
+//               state: 'Maharashtra'
+//             };
+            
+//             const fieldLabels = {
+//               name: 'Doctor Name',
+//               specialization: 'Specialization',
+//               clinic: 'Clinic/Hospital',
+//               city: 'City',
+//               state: 'State'
+//             };
+            
+//             ['name', 'specialization', 'clinic', 'city', 'state'].forEach(field => {
+//               if (positions[field]) {
+//                 createTextElement(field, sampleData[field], positions[field], fieldLabels[field]);
+//               }
+//             });
+            
+//   // ADD IMAGE CREATION HERE
+// const imageSettings = ${JSON.stringify(formData.imageSettings)};
+// if (imageSettings && imageSettings.enabled) {
+//   createDoctorImage(imageSettings);
+// }
+
+// validateAllElementBounds();
+// setSyncStatus('✅ Elements Created');
+//           }
+          
+//           function createTextElement(fieldName, text, position, label) {
+//             const canvas = document.getElementById('canvas');
+//             const element = document.createElement('div');
+//             element.className = 'text-element';
+//             element.dataset.field = fieldName;
+            
+//             // Handle multi-line text properly
+//             const textLines = String(text).split('\\n');
+//             element.innerHTML = '';
+//             textLines.forEach((line, index) => {
+//               if (index > 0) element.appendChild(document.createElement('br'));
+//               element.appendChild(document.createTextNode(line));
+//             });
+            
+//             // Apply all styling
+//             applyElementStyles(element, position);
+            
+//             // Add coordinates display
+//             const coords = document.createElement('div');
+//             coords.className = 'coords';
+//             updateCoords(coords, position.x, position.y);
+//             element.appendChild(coords);
+            
+//             // Add field label
+//             const fieldLabel = document.createElement('div');
+//             fieldLabel.className = 'field-label';
+//             fieldLabel.textContent = label;
+//             element.appendChild(fieldLabel);
+            
+//             // Add drag functionality
+//             element.addEventListener('mousedown', (e) => startDrag(e, element));
+            
+//             canvas.appendChild(element);
+//             console.log('Created element ' + fieldName + ' at ' + position.x + ',' + position.y);
+//           }
+          
+//           function applyElementStyles(element, position) {
+//             const safeX = Math.max(PADDING, Math.min(position.x, CANVAS_WIDTH - 100));
+//             const safeY = Math.max(PADDING, Math.min(position.y, CANVAS_HEIGHT - 50));
+            
+//             element.style.left = safeX + 'px';
+//             element.style.top = safeY + 'px';
+//             element.style.fontSize = (position.fontSize || 32) + 'px';
+//             element.style.color = position.color || '#000000';
+//             element.style.fontFamily = position.fontFamily || 'Arial';
+//             element.style.fontWeight = position.fontWeight || 'normal';
+            
+//             if (position.textShadow && position.textShadow !== 'none') {
+//               element.style.textShadow = position.textShadow;
+//             } else {
+//               element.style.textShadow = '';
+//             }
+//           }
+          
+//           function updateCoords(coordsElement, x, y) {
+//             const isNearBoundary = x <= PADDING || y <= PADDING || 
+//                                   x >= CANVAS_WIDTH - 100 || y >= CANVAS_HEIGHT - 50;
+//             coordsElement.textContent = 'x:' + x + ', y:' + y + (isNearBoundary ? ' ⚠️' : '');
+//             coordsElement.style.backgroundColor = isNearBoundary ? '#ef4444' : '#333';
+//           }
+          
+//           function updateElementStyle(fieldName, position, text) {
+//             const element = document.querySelector('[data-field="' + fieldName + '"]');
+//             if (!element) {
+//               console.warn('Element not found for field: ' + fieldName);
+//               return;
+//             }
+            
+//             console.log('Updating ' + fieldName + ' with:', position, text);
+            
+//             // Update text content for multi-line support
+//             if (fieldName === 'customText' && text !== undefined) {
+//               const textLines = String(text).split('\\n');
+//               element.innerHTML = '';
+//               textLines.forEach((line, index) => {
+//                 if (index > 0) element.appendChild(document.createElement('br'));
+//                 element.appendChild(document.createTextNode(line));
+//               });
               
-              <script>
-                let isDragging = false;
-                let currentElement = null;
-                let dragOffset = { x: 0, y: 0 };
-                
-                function createTextElements() {
-                  const canvas = document.getElementById('canvas');
-                  canvas.innerHTML = '';
-                  
-                  const positions = ${JSON.stringify(formData.textPositions)};
-                  const customText = \`${formData.customText}\`;
-                  
-                  // Create custom text element
-                  createTextElement('customText', customText, positions.customText, 'Custom Text');
-                  
-                  // Create doctor field elements
-                  const sampleData = {
-                    name: 'Dr. John Smith',
-                    specialization: 'Cardiologist', 
-                    clinic: 'City Hospital',
-                    city: 'Mumbai',
-                    state: 'Maharashtra'
-                  };
-                  
-                  const fieldLabels = {
-                    name: 'Doctor Name',
-                    specialization: 'Specialization',
-                    clinic: 'Clinic/Hospital',
-                    city: 'City',
-                    state: 'State'
-                  };
-                  
-                  ['name', 'specialization', 'clinic', 'city', 'state'].forEach(field => {
-                    createTextElement(field, sampleData[field], positions[field], fieldLabels[field]);
-                  });
-                }
-                
-                function createTextElement(fieldName, text, position, label) {
-                  const canvas = document.getElementById('canvas');
-                  const element = document.createElement('div');
-                  element.className = 'text-element';
-                  element.dataset.field = fieldName;
-                  element.innerHTML = text;
-                  
-                  // Apply all styling with real-time updates
-                  element.style.left = position.x + 'px';
-                  element.style.top = position.y + 'px';
-                  element.style.fontSize = position.fontSize + 'px';
-                  element.style.color = position.color;
-                  element.style.fontFamily = position.fontFamily;
-                  element.style.fontWeight = position.fontWeight;
-                  if (position.textShadow && position.textShadow !== 'none') {
-                    element.style.textShadow = position.textShadow;
-                  }
-                  
-                  // Add coordinates display
-                  const coords = document.createElement('div');
-                  coords.className = 'coords';
-                  coords.textContent = \`x:\${position.x}, y:\${position.y}\`;
-                  element.appendChild(coords);
-                  
-                  // Add field label
-                  const fieldLabel = document.createElement('div');
-                  fieldLabel.className = 'field-label';
-                  fieldLabel.textContent = label;
-                  element.appendChild(fieldLabel);
-                  
-                  // Add drag functionality
-                  element.addEventListener('mousedown', (e) => startDrag(e, element));
-                  
-                  canvas.appendChild(element);
-                }
-                
-                function updateElementStyle(fieldName, position, text) {
-                  const element = document.querySelector(\`[data-field="\${fieldName}"]\`);
-                  if (!element) return;
-                  
-                  // Update text content if it's custom text
-                  if (fieldName === 'customText') {
-                    element.innerHTML = '';
-                    element.appendChild(document.createTextNode(text));
-                    
-                    // Re-add coords and label
-                    const coords = document.createElement('div');
-                    coords.className = 'coords';
-                    coords.textContent = \`x:\${position.x}, y:\${position.y}\`;
-                    element.appendChild(coords);
-                    
-                    const fieldLabel = document.createElement('div');
-                    fieldLabel.className = 'field-label';
-                    fieldLabel.textContent = 'Custom Text';
-                    element.appendChild(fieldLabel);
-                  }
-                  
-                  // Update all styling properties
-                  element.style.left = position.x + 'px';
-                  element.style.top = position.y + 'px';
-                  element.style.fontSize = position.fontSize + 'px';
-                  element.style.color = position.color;
-                  element.style.fontFamily = position.fontFamily;
-                  element.style.fontWeight = position.fontWeight;
-                  
-                  if (position.textShadow && position.textShadow !== 'none') {
-                    element.style.textShadow = position.textShadow;
-                  } else {
-                    element.style.textShadow = '';
-                  }
-                  
-                  // Update coordinates display
-                  const coords = element.querySelector('.coords');
-                  if (coords) coords.textContent = \`x:\${position.x}, y:\${position.y}\`;
-                }
-                
-                function startDrag(e, element) {
-                  isDragging = true;
-                  currentElement = element;
-                  const rect = element.getBoundingClientRect();
-                  dragOffset.x = e.clientX - rect.left;
-                  dragOffset.y = e.clientY - rect.top;
-                  
-                  element.style.zIndex = '1000';
-                  element.style.transform = 'scale(1.05)';
-                  document.addEventListener('mousemove', onDrag);
-                  document.addEventListener('mouseup', stopDrag);
-                  e.preventDefault();
-                }
-                
-                function onDrag(e) {
-                  if (!isDragging || !currentElement) return;
-                  
-                  const canvasRect = document.getElementById('canvas').getBoundingClientRect();
-                  const canvasWidth = ${formData.imageDimensions?.width || 800};
-const canvasHeight = ${formData.imageDimensions?.height || 600};
-const x = Math.max(0, Math.min(e.clientX - canvasRect.left - dragOffset.x, canvasWidth - currentElement.offsetWidth));
-const y = Math.max(0, Math.min(e.clientY - canvasRect.top - dragOffset.y, canvasHeight - currentElement.offsetHeight));                  
-                  currentElement.style.left = x + 'px';
-                  currentElement.style.top = y + 'px';
-                  
-                  // Update coordinates display
-                  const coords = currentElement.querySelector('.coords');
-                  if (coords) coords.textContent = \`x:\${x}, y:\${y}\`;
-                  
-                  // Send position update to parent window
-                  if (window.opener && !window.opener.closed) {
-                    window.opener.updatePositionFromPreview(currentElement.dataset.field, x, y);
-                  }
-                }
-                
-                function stopDrag() {
-                  if (currentElement) {
-                    currentElement.style.zIndex = '';
-                    currentElement.style.transform = '';
-                  }
-                  isDragging = false;
-                  currentElement = null;
-                  document.removeEventListener('mousemove', onDrag);
-                  document.removeEventListener('mouseup', stopDrag);
-                }
-                
-                // Function to update positions and styles from parent - REAL TIME
-                // Function to update positions and styles from parent - REAL TIME
-window.updatePositions = function(positions, customText) {
-  // Update each element individually for real-time updates
-  updateElementStyle('customText', positions.customText, customText);
+//               // Re-add coords and label
+//               const coords = document.createElement('div');
+//               coords.className = 'coords';
+//               updateCoords(coords, position.x, position.y);
+//               element.appendChild(coords);
+              
+//               const fieldLabel = document.createElement('div');
+//               fieldLabel.className = 'field-label';
+//               fieldLabel.textContent = 'Custom Text';
+//               element.appendChild(fieldLabel);
+//             }
+            
+//             // Apply styles
+//             applyElementStyles(element, position);
+            
+//             // Update coordinates display
+//             const coords = element.querySelector('.coords');
+//             if (coords) {
+//               updateCoords(coords, position.x, position.y);
+//             }
+            
+//             setSyncStatus('🔄 Updated', '#2563eb');
+//             setTimeout(() => setSyncStatus('✅ Synced'), 200);
+//           }
+          
+//           function startDrag(e, element) {
+//             isDragging = true;
+//             currentElement = element;
+//             const rect = element.getBoundingClientRect();
+//             const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+//             dragOffset.x = e.clientX - rect.left;
+//             dragOffset.y = e.clientY - rect.top;
+            
+//             element.style.zIndex = '1000';
+//             element.style.transform = 'scale(1.05)';
+//             document.addEventListener('mousemove', onDrag);
+//             document.addEventListener('mouseup', stopDrag);
+//             e.preventDefault();
+            
+//             setSyncStatus('🤏 Dragging', '#f59e0b');
+//           }
+          
+//           function onDrag(e) {
+//             if (!isDragging || !currentElement) return;
+            
+//             const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+            
+//             const elementWidth = Math.max(currentElement.offsetWidth, currentElement.scrollWidth);
+//             const elementHeight = Math.max(currentElement.offsetHeight, currentElement.scrollHeight);
+            
+//             const maxX = Math.max(PADDING, CANVAS_WIDTH - elementWidth - PADDING);
+//             const maxY = Math.max(PADDING, CANVAS_HEIGHT - elementHeight - PADDING);
+            
+//             const x = Math.max(PADDING, Math.min(e.clientX - canvasRect.left - dragOffset.x, maxX));
+//             const y = Math.max(PADDING, Math.min(e.clientY - canvasRect.top - dragOffset.y, maxY));
+            
+//             currentElement.style.left = x + 'px';
+//             currentElement.style.top = y + 'px';
+            
+//             const coords = currentElement.querySelector('.coords');
+//             if (coords) {
+//               updateCoords(coords, x, y);
+//             }
+            
+//             if (window.opener && !window.opener.closed) {
+//               try {
+//                 window.opener.updatePositionFromPreview(currentElement.dataset.field, x, y);
+//               } catch (error) {
+//                 console.warn('Failed to update parent:', error);
+//               }
+//             }
+//           }
+          
+//           function stopDrag() {
+//             if (currentElement) {
+//               currentElement.style.zIndex = '';
+//               currentElement.style.transform = '';
+//             }
+//             isDragging = false;
+//             currentElement = null;
+//             document.removeEventListener('mousemove', onDrag);
+//             document.removeEventListener('mouseup', stopDrag);
+            
+//             validateAllElementBounds();
+//             setSyncStatus('✅ Position Updated', '#10b981');
+//           }
+          
+//           function validateAllElementBounds() {
+//             const canvas = document.getElementById('canvas');
+//             const elements = canvas.querySelectorAll('.text-element');
+            
+//             elements.forEach(element => {
+//               const rect = element.getBoundingClientRect();
+//               const canvasRect = canvas.getBoundingClientRect();
+//               const relativeRect = {
+//                 right: rect.right - canvasRect.left,
+//                 bottom: rect.bottom - canvasRect.top
+//               };
+              
+//               if (relativeRect.right > CANVAS_WIDTH || relativeRect.bottom > CANVAS_HEIGHT) {
+//                 element.classList.add('boundary-warning');
+//                 element.title = 'Element extends beyond canvas boundaries';
+//               } else {
+//                 element.classList.remove('boundary-warning');
+//                 element.title = '';
+//               }
+//             });
+//           }
+          
+//           window.updatePositions = function(positions, customText, imageSettings) {
+//             console.log('🚀 updatePositions called with:', positions, customText, imageSettings);
+            
+//             try {
+//               if (positions.customText) {
+//                 updateElementStyle('customText', positions.customText, customText);
+//               }
+              
+//               const sampleData = {
+//                 name: 'Dr. John Smith',
+//                 specialization: 'Cardiologist', 
+//                 clinic: 'City Hospital',
+//                 city: 'Mumbai',
+//                 state: 'Maharashtra'
+//               };
+              
+//               ['name', 'specialization', 'clinic', 'city', 'state'].forEach(field => {
+//                 if (positions[field]) {
+//                   updateElementStyle(field, positions[field], sampleData[field]);
+//                 }
+//               });
+              
+//               // Update or create doctor image
+//               const existingImage = document.querySelector('.doctor-image');
+//               if (existingImage) {
+//                 existingImage.remove();
+//               }
+              
+//               if (imageSettings && imageSettings.enabled) {
+//                 createDoctorImage(imageSettings);
+//               }
+              
+//               validateAllElementBounds();
+              
+//             } catch (error) {
+//               console.error('Error updating positions:', error);
+//               setSyncStatus('❌ Update Failed', '#ef4444');
+//             }
+//           };
+
+//           // ADD THIS NEW FUNCTION RIGHT BEFORE createTextElements()
+// function createDoctorImage(imageSettings) {
+//   if (!imageSettings || !imageSettings.enabled) return;
   
-  const sampleData = {
-    name: 'Dr. John Smith',
-    specialization: 'Cardiologist', 
-    clinic: 'City Hospital',
-    city: 'Mumbai',
-    state: 'Maharashtra'
-  };
+//   const canvas = document.getElementById('canvas');
+//   const imageElement = document.createElement('div');
+//   imageElement.className = 'doctor-image';
+//   imageElement.dataset.field = 'doctorImage';
+//   imageElement.style.position = 'absolute';
+//   imageElement.style.left = imageSettings.x + 'px';
+//   imageElement.style.top = imageSettings.y + 'px';
+//   imageElement.style.width = imageSettings.width + 'px';
+//   imageElement.style.height = imageSettings.height + 'px';
+//   imageElement.style.backgroundColor = '#e8f4f8';
+//   imageElement.style.border = '2px dashed #10b981';
+//   imageElement.style.borderRadius = imageSettings.borderRadius + '%';
+//   imageElement.style.opacity = imageSettings.opacity / 100;
+//   imageElement.style.cursor = 'move';
+//   imageElement.style.display = 'flex';
+//   imageElement.style.alignItems = 'center';
+//   imageElement.style.justifyContent = 'center';
+//   imageElement.style.backgroundImage = 'url("data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 24 24\\' fill=\\'%23666\\'%3E%3Cpath d=\\'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z\\'/%3E%3C/svg%3E")';
+//   imageElement.style.backgroundSize = '60%';
+//   imageElement.style.backgroundRepeat = 'no-repeat';
+//   imageElement.style.backgroundPosition = 'center';
   
-  ['name', 'specialization', 'clinic', 'city', 'state'].forEach(field => {
-    if (positions[field]) {
-      updateElementStyle(field, positions[field], sampleData[field]);
+//   // Add border if enabled
+//   if (imageSettings.border && imageSettings.border.enabled) {
+//     imageElement.style.border = imageSettings.border.width + 'px solid ' + imageSettings.border.color;
+//   }
+  
+//   // Add coordinates display
+//   const coords = document.createElement('div');
+//   coords.className = 'coords';
+//   updateCoords(coords, imageSettings.x, imageSettings.y);
+//   imageElement.appendChild(coords);
+  
+//   // Add field label
+//   const fieldLabel = document.createElement('div');
+//   fieldLabel.className = 'field-label';
+//   fieldLabel.textContent = 'Doctor Photo';
+//   fieldLabel.style.background = '#10b981';
+//   imageElement.appendChild(fieldLabel);
+  
+//   // Add drag functionality
+//   imageElement.addEventListener('mousedown', (e) => startImageDrag(e, imageElement));
+  
+//   canvas.appendChild(imageElement);
+//   console.log('Created doctor image at', imageSettings.x, imageSettings.y);
+// }
+
+// function startImageDrag(e, element) {
+//   isDragging = true;
+//   currentElement = element;
+//   const rect = element.getBoundingClientRect();
+//   const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+//   dragOffset.x = e.clientX - rect.left;
+//   dragOffset.y = e.clientY - rect.top;
+  
+//   element.style.zIndex = '1000';
+//   element.style.transform = 'scale(1.05)';
+//   document.addEventListener('mousemove', onImageDrag);
+//   document.addEventListener('mouseup', stopImageDrag);
+//   e.preventDefault();
+  
+//   setSyncStatus('🤏 Dragging Image', '#f59e0b');
+// }
+
+// function onImageDrag(e) {
+//   if (!isDragging || !currentElement) return;
+  
+//   const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+//   const elementWidth = currentElement.offsetWidth;
+//   const elementHeight = currentElement.offsetHeight;
+//   const maxX = Math.max(PADDING, CANVAS_WIDTH - elementWidth - PADDING);
+//   const maxY = Math.max(PADDING, CANVAS_HEIGHT - elementHeight - PADDING);
+//   const x = Math.max(PADDING, Math.min(e.clientX - canvasRect.left - dragOffset.x, maxX));
+//   const y = Math.max(PADDING, Math.min(e.clientY - canvasRect.top - dragOffset.y, maxY));
+  
+//   currentElement.style.left = x + 'px';
+//   currentElement.style.top = y + 'px';
+  
+//   const coords = currentElement.querySelector('.coords');
+//   if (coords) {
+//     updateCoords(coords, x, y);
+//   }
+  
+//   // Update parent window
+//   if (window.opener && !window.opener.closed) {
+//     try {
+//       window.opener.updateImagePositionFromPreview(x, y);
+//     } catch (error) {
+//       console.warn('Failed to update parent:', error);
+//     }
+//   }
+// }
+
+// function stopImageDrag() {
+//   if (currentElement) {
+//     currentElement.style.zIndex = '';
+//     currentElement.style.transform = '';
+//   }
+//   isDragging = false;
+//   currentElement = null;
+//   document.removeEventListener('mousemove', onImageDrag);
+//   document.removeEventListener('mouseup', stopImageDrag);
+//   setSyncStatus('✅ Image Position Updated', '#10b981');
+// }
+
+
+         
+
+          
+//           window.onbeforeunload = function() {
+//             if (window.opener && !window.opener.closed) {
+//               window.opener.livePreviewWindow = null;
+//             }
+//           };
+          
+//           setSyncStatus('🚀 Ready');
+          
+//           console.log('Live preview initialized successfully');
+//         </script>
+//       </body>
+//     </html>
+//   `);
+  
+//   window.livePreviewWindow = livePreviewWindow;
+// }}
+  
+onClick={() => {
+  // Close existing preview window if open
+  if (window.livePreviewWindow && !window.livePreviewWindow.closed) {
+    window.livePreviewWindow.close();
+  }
+  
+  const livePreviewWindow = window.open('', 'live-preview', 'width=1200,height=800,scrollbars=yes,resizable=yes');
+  
+  const canvasWidth = formData.imageDimensions?.width || 800;
+  const canvasHeight = formData.imageDimensions?.height || 600;
+  
+  livePreviewWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Live Template Preview</title>
+  <style>
+    body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f0f0; }
+    .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .canvas { position: relative; border: 2px solid #333; margin: 20px auto; background-size: cover; background-repeat: no-repeat; background-position: center; overflow: hidden; }
+    .text-element { position: absolute; border: 2px dashed #3b82f6; background: rgba(255,255,255,0.8); padding: 4px 8px; border-radius: 4px; cursor: move; user-select: none; white-space: pre-line; transition: all 0.2s ease; min-width: 20px; min-height: 20px; }
+    .text-element:hover { background: rgba(59,130,246,0.1); transform: scale(1.02); }
+    .doctor-image { position: absolute; border: 2px dashed #10b981; background: #e8f4f8; cursor: move; display: flex; align-items: center; justify-content: center; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23666'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E"); background-size: 60%; background-repeat: no-repeat; background-position: center; }
+    .coords { position: absolute; top: -25px; left: 0; background: #333; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; pointer-events: none; z-index: 1000; }
+    .field-label { position: absolute; top: -50px; right: 0; background: #10b981; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; pointer-events: none; z-index: 1000; }
+    .header { text-align: center; margin-bottom: 20px; }
+    .controls { margin-bottom: 20px; text-align: center; }
+    .sync-indicator { display: inline-block; padding: 4px 8px; background: #10b981; color: white; border-radius: 4px; font-size: 12px; margin-left: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>🎨 Live Template Preview</h2>
+      <p>✨ Real-time updates: Colors, fonts, and positions sync instantly! Drag elements to reposition.</p>
+      <div class="controls">
+        <span>Canvas: ${canvasWidth}×${canvasHeight}px</span>
+        <span class="sync-indicator" id="syncStatus">🔄 Synced</span>
+      </div>
+    </div>
+    <div id="canvas" class="canvas" style="width: ${canvasWidth}px; height: ${canvasHeight}px; background-image: url('${previewImage}');">
+    </div>
+  </div>
+  
+  <script>
+    let isDragging = false;
+    let currentElement = null;
+    let dragOffset = { x: 0, y: 0 };
+    
+    const CANVAS_WIDTH = ${canvasWidth};
+    const CANVAS_HEIGHT = ${canvasHeight};
+    const PADDING = 10;
+    
+    function setSyncStatus(status, color = '#10b981') {
+      const indicator = document.getElementById('syncStatus');
+      if (indicator) {
+        indicator.textContent = status;
+        indicator.style.background = color;
+        setTimeout(() => {
+          indicator.textContent = '✅ Synced';
+          indicator.style.background = '#10b981';
+        }, 1000);
+      }
     }
-  });
-};
-                
-                // Initialize
-                createTextElements();
-                
-                // Keep window reference in parent
-                window.onbeforeunload = function() {
-                  if (window.opener && !window.opener.closed) {
-                    window.opener.livePreviewWindow = null;
-                  }
-                };
-              </script>
-            </body>
-          </html>
-        `);
+    
+    function updateCoords(coordsElement, x, y) {
+      coordsElement.textContent = 'x:' + x + ', y:' + y;
+    }
+    
+    function applyElementStyles(element, position) {
+      element.style.left = (position.x || 0) + 'px';
+      element.style.top = (position.y || 0) + 'px';
+      element.style.fontSize = (position.fontSize || 32) + 'px';
+      element.style.color = position.color || '#000000';
+      element.style.fontFamily = position.fontFamily || 'Arial';
+      element.style.fontWeight = position.fontWeight || 'normal';
+      
+      if (position.textShadow && position.textShadow !== 'none') {
+        element.style.textShadow = position.textShadow;
+      } else {
+        element.style.textShadow = '';
+      }
+    }
+    
+    function updateElementStyle(fieldName, position, text) {
+      const element = document.querySelector('[data-field="' + fieldName + '"]');
+      if (!element) {
+        console.warn('Element not found for field: ' + fieldName);
+        return;
+      }
+      
+      // Update text content for custom text
+      if (fieldName === 'customText' && text !== undefined) {
+        const textLines = String(text).split('\\n');
+        element.innerHTML = '';
+        textLines.forEach((line, index) => {
+          if (index > 0) element.appendChild(document.createElement('br'));
+          element.appendChild(document.createTextNode(line));
+        });
         
-        window.livePreviewWindow = livePreviewWindow;
-      }}
-      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-    >
-      🚀 Open Live Preview
-    </button>
-  )}
-</div>
+        // Re-add coords and label
+        const coords = document.createElement('div');
+        coords.className = 'coords';
+        updateCoords(coords, position.x, position.y);
+        element.appendChild(coords);
+        
+        const fieldLabel = document.createElement('div');
+        fieldLabel.className = 'field-label';
+        fieldLabel.textContent = 'Custom Text';
+        element.appendChild(fieldLabel);
+      }
+      
+      // Apply styles
+      applyElementStyles(element, position);
+      
+      // Update coordinates display
+      const coords = element.querySelector('.coords');
+      if (coords) {
+        updateCoords(coords, position.x, position.y);
+      }
+      
+      setSyncStatus('🔄 Updated', '#2563eb');
+    }
+    
+    function createTextElement(fieldName, text, position, label) {
+      const canvas = document.getElementById('canvas');
+      const element = document.createElement('div');
+      element.className = 'text-element';
+      element.dataset.field = fieldName;
+      
+      // Handle multi-line text
+      const textLines = String(text).split('\\n');
+      element.innerHTML = '';
+      textLines.forEach((line, index) => {
+        if (index > 0) element.appendChild(document.createElement('br'));
+        element.appendChild(document.createTextNode(line));
+      });
+      
+      // Apply styling
+      applyElementStyles(element, position);
+      
+      // Add coordinates display
+      const coords = document.createElement('div');
+      coords.className = 'coords';
+      updateCoords(coords, position.x, position.y);
+      element.appendChild(coords);
+      
+      // Add field label
+      const fieldLabel = document.createElement('div');
+      fieldLabel.className = 'field-label';
+      fieldLabel.textContent = label;
+      element.appendChild(fieldLabel);
+      
+      // Add drag functionality
+      element.addEventListener('mousedown', (e) => startDrag(e, element));
+      
+      canvas.appendChild(element);
+    }
+    
+    function createDoctorImage(imageSettings) {
+      if (!imageSettings || !imageSettings.enabled) return;
+      
+      const canvas = document.getElementById('canvas');
+      const imageElement = document.createElement('div');
+      imageElement.className = 'doctor-image';
+      imageElement.dataset.field = 'doctorImage';
+      imageElement.style.left = imageSettings.x + 'px';
+      imageElement.style.top = imageSettings.y + 'px';
+      imageElement.style.width = imageSettings.width + 'px';
+      imageElement.style.height = imageSettings.height + 'px';
+      imageElement.style.borderRadius = imageSettings.borderRadius + '%';
+      imageElement.style.opacity = imageSettings.opacity / 100;
+      
+      // Add coordinates display
+      const coords = document.createElement('div');
+      coords.className = 'coords';
+      updateCoords(coords, imageSettings.x, imageSettings.y);
+      imageElement.appendChild(coords);
+      
+      // Add field label
+      const fieldLabel = document.createElement('div');
+      fieldLabel.className = 'field-label';
+      fieldLabel.textContent = 'Doctor Photo';
+      fieldLabel.style.background = '#10b981';
+      imageElement.appendChild(fieldLabel);
+      
+      // Add drag functionality
+      imageElement.addEventListener('mousedown', (e) => startDrag(e, imageElement));
+      
+      canvas.appendChild(imageElement);
+    }
+    
+    function updateDoctorImage(imageSettings) {
+      const existingImage = document.querySelector('.doctor-image');
+      if (existingImage) {
+        existingImage.remove();
+      }
+      
+      if (imageSettings && imageSettings.enabled) {
+        createDoctorImage(imageSettings);
+      }
+    }
+    
+    function startDrag(e, element) {
+      isDragging = true;
+      currentElement = element;
+      const rect = element.getBoundingClientRect();
+      dragOffset.x = e.clientX - rect.left;
+      dragOffset.y = e.clientY - rect.top;
+      
+      element.style.zIndex = '1000';
+      element.style.transform = 'scale(1.05)';
+      document.addEventListener('mousemove', onDrag);
+      document.addEventListener('mouseup', stopDrag);
+      e.preventDefault();
+      
+      setSyncStatus('🤏 Dragging', '#f59e0b');
+    }
+    
+    function onDrag(e) {
+      if (!isDragging || !currentElement) return;
+      
+      const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+      const x = Math.max(PADDING, Math.min(e.clientX - canvasRect.left - dragOffset.x, CANVAS_WIDTH - 100));
+      const y = Math.max(PADDING, Math.min(e.clientY - canvasRect.top - dragOffset.y, CANVAS_HEIGHT - 50));
+      
+      currentElement.style.left = x + 'px';
+      currentElement.style.top = y + 'px';
+      
+      const coords = currentElement.querySelector('.coords');
+      if (coords) {
+        updateCoords(coords, x, y);
+      }
+      
+      // Update parent window in real-time
+      if (window.opener && !window.opener.closed) {
+        try {
+          const fieldName = currentElement.dataset.field;
+          if (fieldName === 'doctorImage') {
+            window.opener.updateImagePositionFromPreview(x, y);
+          } else {
+            window.opener.updatePositionFromPreview(fieldName, x, y);
+          }
+        } catch (error) {
+          console.warn('Failed to update parent:', error);
+        }
+      }
+    }
+    
+    function stopDrag() {
+      if (currentElement) {
+        currentElement.style.zIndex = '';
+        currentElement.style.transform = '';
+      }
+      isDragging = false;
+      currentElement = null;
+      document.removeEventListener('mousemove', onDrag);
+      document.removeEventListener('mouseup', stopDrag);
+      setSyncStatus('✅ Position Updated', '#10b981');
+    }
+    
+    function createTextElements() {
+      const canvas = document.getElementById('canvas');
+      canvas.innerHTML = '';
+      
+      const positions = ${JSON.stringify(formData.textPositions)};
+      const customText = ${JSON.stringify(formData.customText)};
+      const imageSettings = ${JSON.stringify(formData.imageSettings)};
+      
+      console.log('Creating elements with:', { positions, customText, imageSettings });
+      
+      // Create custom text element
+      if (positions.customText) {
+        createTextElement('customText', customText, positions.customText, 'Custom Text');
+      }
+      
+      // Create doctor field elements
+      const sampleData = {
+        name: 'Dr. John Smith',
+        specialization: 'Cardiologist', 
+        clinic: 'City Hospital',
+        city: 'Mumbai',
+        state: 'Maharashtra'
+      };
+      
+      const fieldLabels = {
+        name: 'Doctor Name',
+        specialization: 'Specialization',
+        clinic: 'Clinic/Hospital',
+        city: 'City',
+        state: 'State'
+      };
+      
+      ['name', 'specialization', 'clinic', 'city', 'state'].forEach(field => {
+        if (positions[field]) {
+          createTextElement(field, sampleData[field], positions[field], fieldLabels[field]);
+        }
+      });
+      
+      // Create doctor image if enabled
+      if (imageSettings && imageSettings.enabled) {
+        createDoctorImage(imageSettings);
+      }
+      
+      setSyncStatus('✅ Elements Created');
+    }
+    
+    // ENHANCED: Real-time update function
+    window.updatePositions = function(positions, customText, imageSettings) {
+      console.log('🚀 Real-time update:', { positions, customText, imageSettings });
+      
+      try {
+        // Update custom text
+        if (positions.customText) {
+          updateElementStyle('customText', positions.customText, customText);
+        }
+        
+        // Update doctor fields
+        const sampleData = {
+          name: 'Dr. John Smith',
+          specialization: 'Cardiologist', 
+          clinic: 'City Hospital',
+          city: 'Mumbai',
+          state: 'Maharashtra'
+        };
+        
+        ['name', 'specialization', 'clinic', 'city', 'state'].forEach(field => {
+          if (positions[field]) {
+            updateElementStyle(field, positions[field], sampleData[field]);
+          }
+        });
+        
+        // Update doctor image
+        updateDoctorImage(imageSettings);
+        
+        setSyncStatus('🔄 Live Update', '#2563eb');
+      } catch (error) {
+        console.error('Update error:', error);
+        setSyncStatus('❌ Update Failed', '#ef4444');
+      }
+    };
+    
+    // Initialize
+    createTextElements();
+    setSyncStatus('🚀 Ready');
+    
+    console.log('✅ Live preview loaded successfully!');
+  </script>
+</body>
+</html>`);
+  
+  window.livePreviewWindow = livePreviewWindow;
+}}
+  
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            🚀 Open Live Preview
+          </button>
+        )}
+      </div>
       <div className="flex justify-end pt-4">
         <button
           type="button"
@@ -3605,3 +4476,4 @@ export default Gallery;
 
 
 //! DONE this live editor-- now pn chatgpt..
+//! On sunday

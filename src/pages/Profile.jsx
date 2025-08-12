@@ -235,11 +235,13 @@ const Profile = () => {
       valid = false;
     }
     // Only require photo for video templates
-    if (selectedTemplateType === "video" && profileImage === profile) {
-      toast.error("Profile image is required for video templates");
-      newErrors.profileImage = "Profile image is required for video templates";
-      valid = false;
-    }
+// Only require photo for video templates (images are optional)
+if (selectedTemplateType === "video" && profileImage === profile) {
+  toast.error("Profile image is required for video templates");
+  newErrors.profileImage = "Profile image is required for video templates";
+  valid = false;
+}
+// For image templates, photos are optional - no validation needed
 
     setErrors(newErrors);
     return valid;
@@ -328,12 +330,14 @@ console.log("🔍 Specialization key:", formData.specialization_key);
 if (ID) {
   formDataToSend.append("employee", ID); // Keep using database ID for video since it works
 }
-
-      // Add image if changed
-      if (profileImage !== profile) {
-        const blob = await fetch(profileImage).then((r) => r.blob());
-        formDataToSend.append("image", blob, "profile.jpg");
-      }
+// Add image for video templates (required) and image templates (optional)
+if (profileImage !== profile) {
+  const blob = await fetch(profileImage).then((r) => r.blob());
+  formDataToSend.append("image", blob, "profile.jpg");
+} else if (selectedTemplateType === "image") {
+  // For image templates without uploaded photo, you might want to send a flag
+  console.log("🔍 Image template without custom photo - using template default");
+}
       let response;
       if (selectedTemplateType === "video") {
   console.log("🔍 Submitting VIDEO template with FormData:");
@@ -877,78 +881,74 @@ console.log("🔍 ================================");
           />
 
           <div className="relative mb-6 w-70 h-70">
-            {selectedTemplateType === "video" ? (
-              // VIDEO TEMPLATE - Photo Upload Enabled
-              showCropper ? (
-                <div className="relative w-full h-full">
-                  <Cropper
-                    image={originalImage}
-                    crop={crop}
-                    zoom={zoom}
-                    aspect={1}
-                    onCropChange={setCrop}
-                    onCropComplete={onCropComplete}
-                    onZoomChange={setZoom}
-                  />
-                  <div className="absolute bottom-4 right-4 flex gap-2">
-                    <button
-                      onClick={() => setShowCropper(false)}
-                      className="bg-gray-500 text-white px-4 py-2 rounded"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={getCroppedImg}
-                      className="bg-blue-500 text-white px-4 py-2 rounded"
-                    >
-                      Upload
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <img
-                    src={profileImage}
-                    alt="Doctor"
-                    className="w-full h-full object-cover border-8 border-blue-900"
-                  />
-                  <div
-                    className="absolute -bottom-2 -right-4 bg-blue-200 rounded-full p-5 cursor-pointer hover:bg-blue-300"
-                    onClick={triggerFileInput}
-                  >
-                    <FaUpload className="w-11 h-11" />
-                  </div>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    accept="image/*"
-                    className="hidden"
-                  />
-                </>
-              )
-            ) : (
-              // IMAGE TEMPLATE - Photo Upload Disabled
-              <div className="relative w-full h-full">
-                <img
-                  src={profileImage}
-                  alt="Template Preview"
-                  className="w-full h-full object-cover border-8 border-gray-300 opacity-50"
-                />
-                <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-20">
-                  <div className="text-center text-white bg-black bg-opacity-70 p-4 rounded-lg">
-                    <div className="text-2xl mb-2">🖼️</div>
-                    <div className="text-sm font-bold">Photo Upload Disabled</div>
-                    <div className="text-xs">Not required for image templates</div>
-                  </div>
-                </div>
-              </div>
-            )}
-            {errors.profileImage && selectedTemplateType === "video" && (
-              <p className="text-red-500 text-sm text-center font-bold mb-4">
-                {errors.profileImage}
-              </p>
-            )}
+           {showCropper ? (
+  <div className="relative w-full h-full">
+    <Cropper
+      image={originalImage}
+      crop={crop}
+      zoom={zoom}
+      aspect={1}
+      onCropChange={setCrop}
+      onCropComplete={onCropComplete}
+      onZoomChange={setZoom}
+    />
+    <div className="absolute bottom-4 right-4 flex gap-2">
+      <button
+        onClick={() => setShowCropper(false)}
+        className="bg-gray-500 text-white px-4 py-2 rounded"
+      >
+        Cancel
+      </button>
+      <button
+        onClick={getCroppedImg}
+        className="bg-blue-500 text-white px-4 py-2 rounded"
+      >
+        Upload
+      </button>
+    </div>
+  </div>
+) : (
+  <>
+    <img
+      src={profileImage}
+      alt="Doctor"
+      className={`w-full h-full object-cover border-8 ${
+        selectedTemplateType === "video" 
+          ? "border-blue-900" 
+          : "border-green-600"
+      }`}
+    />
+    <div
+      className={`absolute -bottom-2 -right-4 rounded-full p-5 cursor-pointer ${
+        selectedTemplateType === "video"
+          ? "bg-blue-200 hover:bg-blue-300"
+          : "bg-green-200 hover:bg-green-300"
+      }`}
+      onClick={triggerFileInput}
+    >
+      <FaUpload className="w-11 h-11" />
+    </div>
+    <input
+      type="file"
+      ref={fileInputRef}
+      onChange={handleFileChange}
+      accept="image/*"
+      className="hidden"
+    />
+    {/* Template Type Indicator */}
+    <div className={`absolute top-2 left-2 px-2 py-1 rounded text-xs font-bold text-white ${
+      selectedTemplateType === "video" ? "bg-blue-600" : "bg-green-600"
+    }`}>
+      {selectedTemplateType === "video" ? "📹 Video" : "🖼️ Image"}
+      {selectedTemplateType === "image" && <span className="text-xs block">Photo Optional</span>}
+    </div>
+  </>
+)}
+{errors.profileImage && (
+  <p className="text-red-500 text-sm text-center font-bold mb-4">
+    {errors.profileImage}
+  </p>
+)}
           </div>
 
           {/* <div className="w-full mb-4">
@@ -969,16 +969,25 @@ console.log("🔍 ================================");
             </select>
           </div> */}
 
-          <div className="bg-white border border-red-300 p-3 rounded-md text-xs text-red-600 space-y-1">
-            <p>
-              1. For better quality size should be width=515px, height=515px*
-            </p>
-            <p>2. Max File Size should be 500KB for greeting and JPG*</p>
-            <p>
-              3. Video processing will take up to 60 minutes or more depending
-              on video rendering.*
-            </p>
-          </div>
+          <div className={`bg-white border p-3 rounded-md text-xs space-y-1 ${
+  selectedTemplateType === "video" 
+    ? "border-red-300 text-red-600" 
+    : "border-green-300 text-green-600"
+}`}>
+  <div className="font-bold mb-1">
+    {selectedTemplateType === "video" ? "📹 Video Template Rules:" : "🖼️ Image Template Rules:"}
+  </div>
+  <p>1. For better quality size should be width=515px, height=515px*</p>
+  <p>2. Max File Size should be 500KB for greeting and JPG*</p>
+  {selectedTemplateType === "video" ? (
+    <p>3. Video processing will take up to 60 minutes or more depending on video rendering.*</p>
+  ) : (
+    <>
+      <p>3. Photo upload is optional for image templates*</p>
+      <p>4. Image processing typically takes 1-2 minutes*</p>
+    </>
+  )}
+</div>
         </div>
       </div>
     </div>
@@ -986,3 +995,6 @@ console.log("🔍 ================================");
 };
 
 export default Profile;
+
+
+//! On SUNDAy
